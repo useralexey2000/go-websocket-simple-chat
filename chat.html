@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>chat-room</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+</head>
+<body>
+    <h4>Chat room:</h4>
+    <form action="javascript:;" onsubmit="sendMessage(this)">
+        <input type="text" name="message">
+        <input type="submit" value="send">
+    </form>
+    
+    <ul id="chat-screen"></ul>
+
+    <script>    
+    //Open ws connection.
+        var host = location.host;     
+        var ws = new WebSocket("ws://" + host+ "/ws");
+        ws.onopen = function() {
+            //Ping with sess cookies.
+            ws.send("ping");
+            
+        };
+        ws.onclose = function(event) {
+            if (event.wasClean) {
+                console.log("ws conn closed clean.")
+            } else {
+                console.log("ws conn broken.")
+            }
+            console.log("code: " + event.code + " reason: " + event.reason);
+        };
+        //Print messg.
+        ws.onmessage = function(event) {
+            var screen = document.getElementById("chat-screen");
+            var msg = JSON.parse(event.data);
+            screen.innerHTML = "<li>" + msg.username + ": " + msg.text + "</li>" + screen.innerHTML;
+        };
+        ws.onerror = function(error) {
+            console.log(error.message);
+        };
+
+        //Send message to server.
+        function sendMessage(form) {
+            var msg = form.message.value;
+            ws.send(JSON.stringify({text: msg}));
+            form.message.value = "";
+        }
+
+    </script>
+</body>
+</html>
