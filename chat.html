@@ -20,8 +20,7 @@
         var host = location.host;     
         var ws = new WebSocket("ws://" + host+ "/ws");
         ws.onopen = function() {
-            //Ping with sess cookies.
-            ws.send("ping");
+            console.log("trying to connect to ws")
             
         };
         ws.onclose = function(event) {
@@ -29,6 +28,7 @@
                 console.log("ws conn closed clean.")
             } else {
                 console.log("ws conn broken.")
+                console.log(event)
             }
             console.log("code: " + event.code + " reason: " + event.reason);
         };
