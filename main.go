@@ -1,10 +1,11 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"encoding/json"
 
 	"context"
 
@@ -12,6 +13,13 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/gorilla/websocket"
 )
+
+var port string
+
+func init() {
+	flag.StringVar(&port, "port", "9000", "Specify tcp port.")
+
+}
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -26,6 +34,7 @@ var store = sessions.NewCookieStore([]byte(secretkey), nil)
 var redisAddr = "192.168.0.10:6379"
 
 func main() {
+	flag.Parse()
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     redisAddr,
 		Password: "",
@@ -37,33 +46,12 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println(pong)
-	//
-	//	pubsub := redisClient.Subscribe(ctx, "chat")
-	//
-	//	_, err = pubsub.Receive(ctx)
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	ch := pubsub.Channel()
-	//
-	//	err = redisClient.Publish(ctx, "chat", "hello world").Err()
-	//	if err != nil {
-	//		panic(err)
-	//	}
-	//	time.AfterFunc(time.Second, func() {
-	//		_ = pubsub.Close()
-	//	})
-	//
-	//	for msg := range ch {
-	//		fmt.Println(msg.Channel, msg.Payload)
-	//	}
-	//
 	chat := NewChat(redisClient)
 	go chat.Run()
 	http.HandleFunc("/", indexHandeler)
 	http.HandleFunc("/chat", chatHandler)
 	http.HandleFunc("/ws", wsHandler(chat))
-	log.Fatal(http.ListenAndServe(":9000", nil))
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
 // Message ...
@@ -124,9 +112,9 @@ type Chat struct {
 func NewChat(rc *redis.Client) *Chat {
 	return &Chat{
 		rooms:       make(map[string]*Room),
-		reg:         make(chan *User, 0),
-		unreg:       make(chan *User, 0),
-		broadcast:   make(chan Message, 0),
+		reg:         make(chan *User),
+		unreg:       make(chan *User),
+		broadcast:   make(chan Message),
 		redisClient: rc,
 	}
 }
@@ -196,23 +184,17 @@ func (chat *Chat) Run() {
 				}
 				// broadcast to pubsub user unreg
 			}
-			//		case msg := <-chat.broadcast:
-			//			for _, u := range chat.users {
-			//				fmt.Println("user sent message: ", msg.Username, msg.Text)
-			//				go func() { u.Ch <- msg }()
-			//			}
-		case msg := <-chat.broadcast:
+			case msg := <-chat.broadcast:
 			ctx := context.Background()
-			// TODO encode msg to redis format
-			err := chat.redisClient.Publish(ctx, msg.RoomID, msg).Err()
+			// TODO encode msg to json format
+			encMsg, err := json.Marshal(msg)
 			if err != nil {
 				panic(err)
 			}
-			//		case msg:= <-chat.pubsubChan
-			//			fmt.Println(msg.Channel, msg.Payload)
-			//			for _, u := range chat.users {
-			//				go func() { u.Ch <- msg }()
-			//			}
+			err = chat.redisClient.Publish(ctx, msg.RoomID, encMsg).Err()
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 }
@@ -274,12 +256,10 @@ func wsHandler(chat *Chat) http.HandlerFunc {
 		user := &User{
 			RoomID: "default",
 			Name:   uname,
-			Ch:     make(chan Message, 0),
+			Ch:     make(chan Message),
 			Cht:    chat,
 			Conn:   conn,
 		}
-		// TODO check map if user with such name exists
-		// chat.rooms[user.RoomID].users[user.Name] = user
 		chat.reg <- user
 		fmt.Println("user added: ", user)
 		go user.read()
