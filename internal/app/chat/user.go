@@ -8,18 +8,18 @@ import (
 
 // Message .
 type Message struct {
+	RoomID   string `json:"roomid"`
 	Username string `json:"username"`
 	Text     string `json:"text"`
-	RoomID   string
 }
 
 // User ...
 type User struct {
-	Name   string
-	Ch     chan Message
+	Name string
+	Ch   chan Message
 	RoomID string
-	Cht    *Chat
-	Conn   *websocket.Conn
+	Cht  *Chat
+	Conn *websocket.Conn
 }
 
 func (user *User) write() {
@@ -43,6 +43,6 @@ func (user *User) read() {
 		}
 		msg.Username = user.Name
 		msg.RoomID = user.RoomID
-		user.Cht.broadcast <- msg
+		user.Cht.Rooms[user.RoomID].Broadcast <- msg
 	}
 }
