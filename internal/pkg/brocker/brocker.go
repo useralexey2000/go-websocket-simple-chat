@@ -2,66 +2,54 @@ package brocker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	"github.com/go-redis/redis"
+	"github.com/go-redis/redis/v8"
 )
-
-// Message .
-type Message struct {
-	Ch   string
-	Data string
-}
 
 // Brocker .
 type Brocker interface {
-	Pub(context.Context, string, string) error
-	Sub(context.Context, string) (<-chan Message, error)
+	Pub(context.Context, string, interface{}) error
+	Sub(context.Context, string) (<-chan string, error)
 	UnSub(string)
 }
 
 // RedisBrocker .
 type RedisBrocker struct {
-	*redis.Client
+	client *redis.Client
 	// TODO check if it is possible to unsubscribe without
 	// explicit mapping pubsub in here
 	channels map[string]*redis.PubSub
 }
 
 // NewRedisBrocker .
-func NewRedisBrocker(client *redis.Client) *RedisBrocker {
+func NewRedisBrocker(client *redis.Client) Brocker {
 	return &RedisBrocker{
-		client,
+		client:   client,
+		channels: make(map[string]*redis.PubSub),
 	}
 }
 
 // Pub .
-func (b *RedisBrocker) Pub(ctx context.Context, ch string, msg string) error {
-	return b.Publish(ctx, ch, msg).Err()
+func (b *RedisBrocker) Pub(ctx context.Context, ch string, msg interface{}) error {
+	return b.client.Publish(ctx, ch, msg).Err()
 }
 
 // Sub .
-func (b *RedisBrocker) Sub(ctx context.Context, ch string) (<-chan Message, error) {
-	ps := b.Subscribe(ctx, ch)
+func (b *RedisBrocker) Sub(ctx context.Context, ch string) (<-chan string, error) {
+	ps := b.client.Subscribe(ctx, ch)
 	_, err := ps.Receive(ctx)
 	if err != nil {
+		fmt.Println(err)
 		ps.Close()
 		return nil, err
 	}
-	channel := make(chan Message)
+	channel := make(chan string)
 	b.channels[ch] = ps
 	go func() {
 		ch := ps.Channel()
 		for msg := range ch {
-			var m Message
-			err := json.Unmarshal([]byte(msg.Payload), &m)
-			if err != nil {
-				fmt.Println(err)
-				m = Message{}
-			}
-				channel <- m
-			}
+			channel <- msg.Payload
 		}
 
 	}()
@@ -69,6 +57,6 @@ func (b *RedisBrocker) Sub(ctx context.Context, ch string) (<-chan Message, erro
 
 }
 
-func (b *RedisBrocker)UnSub(ch string) {
+func (b *RedisBrocker) UnSub(ch string) {
 	b.channels[ch].Close()
 }
