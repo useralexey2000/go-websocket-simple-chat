@@ -10,9 +10,12 @@ import (
 
 	"github.com/go-redis/redis/v8"
 	"github.com/useralexey2000/go-websocket-simple-chat/internal/app/chat"
+	"github.com/useralexey2000/go-websocket-simple-chat/internal/pkg/brocker"
 )
 
 var redisAddr = "192.168.0.10:6379"
+
+// port for chat server
 var port string
 
 func init() {
@@ -32,10 +35,12 @@ func main() {
 		log.Fatal(err)
 	}
 	fmt.Println(pong)
-	cht := chat.NewChat(redisClient)
+	brk := brocker.NewRedisBrocker(redisClient)
+	cht := chat.NewChat(brk)
 	go cht.Run()
+	fmt.Println("Server started")
 	http.HandleFunc("/", chat.RegHandler)
-	http.HandleFunc("/index", chat.IndexHandler)
-	http.HandleFunc("/ws", chat.WsHandler(cht))
+	http.HandleFunc("/index", chat.AuthMiddleware(chat.IndexHandler))
+	http.HandleFunc("/ws", chat.AuthMiddleware(chat.WsHandler(cht)))
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
