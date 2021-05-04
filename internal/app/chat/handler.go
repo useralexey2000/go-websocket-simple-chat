@@ -1,6 +1,8 @@
 package chat
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -9,6 +11,8 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/gorilla/websocket"
 )
+
+type userContextKey string
 
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -20,6 +24,31 @@ var upgrader = websocket.Upgrader{
 
 var secretkey = "myauthkey"
 var store = sessions.NewCookieStore([]byte(secretkey), nil)
+
+// AuthModdleware .
+// Checking user authentication
+func AuthMiddleware(next func(w http.ResponseWriter, r *http.Request)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		sess, err := store.Get(r, "login")
+		if err != nil {
+			log.Println("cant get sess: ", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		//fmt.Println(sess.Values)
+		//Check if user is logged in.
+		u, ok := sess.Values["username"].(string)
+		if !ok {
+			http.Redirect(w, r, "/", http.StatusNetworkAuthenticationRequired)
+			return
+		}
+		userKey := userContextKey("username")
+		ctx := context.WithValue(context.Background(), userKey, u)
+		req := r.WithContext(ctx)
+		//fmt.Println("req : ", req.Context().Value(userContextKey("username")))
+		next(w, req)
+	}
+}
 
 // RegHandler .
 func RegHandler(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +69,7 @@ func RegHandler(w http.ResponseWriter, r *http.Request) {
 		if err := sess.Save(r, w); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
-		fmt.Println(sess.Values)
+		//fmt.Println(sess.Values)
 		http.Redirect(w, r, "/index", http.StatusFound)
 	default:
 		http.Error(w, "unsupported request method!", http.StatusBadRequest)
@@ -49,33 +78,49 @@ func RegHandler(w http.ResponseWriter, r *http.Request) {
 
 // IndexHandler .
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	sess, err := store.Get(r, "login")
-	if err != nil {
-		log.Println("cant get sess: ", err)
-		return
-	}
-	fmt.Println(sess.Values)
-	//Check if user is logged in.
-	if _, ok := sess.Values["username"].(string); !ok {
-		http.Redirect(w, r, "/", http.StatusNetworkAuthenticationRequired)
-		return
-	}
+	//	sess, err := store.Get(r, "login")
+	//	if err != nil {
+	//		log.Println("cant get sess: ", err)
+	//		return
+	//	}
+	//	fmt.Println(sess.Values)
+	//	//Check if user is logged in.
+	//	if _, ok := sess.Values["username"].(string); !ok {
+	//		http.Redirect(w, r, "/", http.StatusNetworkAuthenticationRequired)
+	//		return
+	//	}
 	http.ServeFile(w, r, filepath.Join("../../", "web/chat.html"))
 }
 
 // WsHandler .
 func WsHandler(chat *Chat) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("in wsHandler")
-		sess, err := store.Get(r, "login")
-		if err != nil {
-			log.Println("cant get sess: ", err)
+		//		sess, err := store.Get(r, "login")
+		//		if err != nil {
+		//			log.Println("cant get sess: ", err)
+		//			return
+		//		}
+		//		uname := sess.Values["username"].(string)
+		// fmt.Println("in wsHandler")
+		v := r.Context().Value(userContextKey("username"))
+		fmt.Println("value is: ", v)
+		if v == nil {
+			// TODO check errors dont work
+			http.Error(w, errors.New("can't get username").Error(), http.StatusInternalServerError)
 			return
 		}
-		uname := sess.Values["username"].(string)
+		// fmt.Println("before checking")s
+		uname, ok := v.(string)
+		if !ok {
+			// TODO check errors dont work
+			http.Error(w, errors.New("can't use username").Error(), http.StatusInternalServerError)
+			return
+		}
+		// fmt.Println("username: ", uname)
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println("cant upgrade conn: ", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		user := &User{
@@ -86,7 +131,6 @@ func WsHandler(chat *Chat) http.HandlerFunc {
 			Conn:   conn,
 		}
 		chat.reg <- user
-		fmt.Println("user added: ", user)
 		go user.read()
 		go user.write()
 	}
