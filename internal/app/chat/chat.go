@@ -5,66 +5,79 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/go-redis/redis/v8"
+	"github.com/useralexey2000/go-websocket-simple-chat/internal/pkg/brocker"
 )
 
 // Room .
 type Room struct {
-	id     string
-	users  map[string]*User
-	pubsub *redis.PubSub
+	ID        string
+	users     map[string]*User
+	Broadcast chan Message
 }
 
 // Chat .
 type Chat struct {
-	rooms       map[string]*Room
-	reg         chan *User
-	unreg       chan *User
-	broadcast   chan Message
-	redisClient *redis.Client
+	Rooms   map[string]*Room
+	reg     chan *User
+	unreg   chan *User
+	brocker brocker.Brocker
 }
 
 // NewChat .
-func NewChat(rc *redis.Client) *Chat {
+func NewChat(brk brocker.Brocker) *Chat {
 	return &Chat{
-		rooms:       make(map[string]*Room),
-		reg:         make(chan *User),
-		unreg:       make(chan *User),
-		broadcast:   make(chan Message),
-		redisClient: rc,
+		Rooms:   make(map[string]*Room),
+		reg:     make(chan *User),
+		unreg:   make(chan *User),
+		brocker: brk,
 	}
 }
 
-// AddRoom .
-func (chat *Chat) AddRoom(id string) error {
-	if _, ok := chat.rooms[id]; ok {
+func (chat *Chat) addRoom(id string) error {
+	fmt.Printf("adding room num %s\n", id)
+	if _, ok := chat.Rooms[id]; ok {
 		//TODO the room already exist
 		return nil
 	}
 	ctx := context.Background()
-	pubsub := chat.redisClient.Subscribe(ctx, id)
-	_, err := pubsub.Receive(ctx)
+	ch, err := chat.brocker.Sub(ctx, id)
 	if err != nil {
-		pubsub.Close()
 		return err
 	}
 	r := &Room{
-		id:     id,
-		users:  make(map[string]*User),
-		pubsub: pubsub,
+		ID:        id,
+		users:     make(map[string]*User),
+		Broadcast: make(chan Message),
 	}
-	chat.rooms[id] = r
+	chat.Rooms[id] = r
 	go func() {
-		ch := pubsub.Channel()
-		for msg := range ch {
-			var m Message
-			err := json.Unmarshal([]byte(msg.Payload), &m)
-			if err != nil {
-				fmt.Println(err)
-				break
-			}
-			for _, u := range r.users {
-				u.Ch <- m
+		for {
+			select {
+			// messages from brocker
+			case msg := <-ch:
+				fmt.Println(msg)
+				var m Message
+				err := json.Unmarshal([]byte(msg), &m)
+				if err != nil {
+					fmt.Println(err)
+				}
+				fmt.Printf("brocker got message: %v", m)
+				for _, u := range r.users {
+					u.Ch <- m
+				}
+			// messages to brocker
+			case msg := <-r.Broadcast:
+				fmt.Println(msg)
+				ctx = context.Background()
+				m, err := json.Marshal(msg)
+				if err != nil {
+					fmt.Println(err)
+				}
+				fmt.Printf("brocker send message: %v", m)
+				err = chat.brocker.Pub(ctx, r.ID, m)
+				if err != nil {
+					fmt.Println(err)
+				}
 			}
 		}
 	}()
@@ -72,17 +85,17 @@ func (chat *Chat) AddRoom(id string) error {
 }
 
 // RemRoom .
-func (chat *Chat) RemRoom(id string) {
-	if _, ok := chat.rooms[id]; ok {
-		chat.rooms[id].pubsub.Close()
-		delete(chat.rooms, id)
+func (chat *Chat) remRoom(id string) {
+	if _, ok := chat.Rooms[id]; ok {
+		chat.brocker.UnSub(id)
+		delete(chat.Rooms, id)
 	}
 }
 
 // Run .
 func (chat *Chat) Run() {
 	//Default room number
-	err := chat.AddRoom("default")
+	err := chat.addRoom("default")
 	if err != nil {
 		panic(err)
 	}
@@ -90,30 +103,20 @@ func (chat *Chat) Run() {
 		select {
 		case user := <-chat.reg:
 			// TODO add room if user entered with other room num than default
-			r := chat.rooms[user.RoomID]
+			r := chat.Rooms[user.RoomID]
 			// Error when reload page
 			r.users[user.Name] = user
 			// broadcast to pubsub user reg
+			fmt.Printf("user registered: %v", user)
 		case user := <-chat.unreg:
 			r := user.RoomID
-			if _, ok := chat.rooms[r].users[user.Name]; ok {
-				delete(chat.rooms[r].users, user.Name)
+			if _, ok := chat.Rooms[r].users[user.Name]; ok {
+				delete(chat.Rooms[r].users, user.Name)
 				user.Conn.Close()
-				if len(chat.rooms[r].users) == 0 {
-					chat.RemRoom(r)
+				fmt.Printf("user unregistered: %v", user)
+				if len(chat.Rooms[r].users) == 0 && r != "default" {
+					chat.remRoom(r)
 				}
-				// broadcast to pubsub user unreg
-			}
-		case msg := <-chat.broadcast:
-			ctx := context.Background()
-			// TODO encode msg to json format
-			encMsg, err := json.Marshal(msg)
-			if err != nil {
-				panic(err)
-			}
-			err = chat.redisClient.Publish(ctx, msg.RoomID, encMsg).Err()
-			if err != nil {
-				panic(err)
 			}
 		}
 	}
