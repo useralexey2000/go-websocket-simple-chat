@@ -34,7 +34,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(pong)
+	fmt.Println("Connected to message brocker: ", pong)
 	brk := brocker.NewRedisBrocker(redisClient)
 	cht := chat.NewChat(brk)
 	go cht.Run()

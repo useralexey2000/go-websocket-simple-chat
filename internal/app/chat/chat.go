@@ -13,6 +13,8 @@ type Room struct {
 	ID        string
 	users     map[string]*User
 	Broadcast chan Message
+	subChan   <-chan string
+	done	  chan struct{}
 }
 
 // Chat .
@@ -33,89 +35,119 @@ func NewChat(brk brocker.Brocker) *Chat {
 	}
 }
 
-func (chat *Chat) addRoom(id string) error {
+func (chat *Chat) addRoom(id string)(*Room, error) {
 	fmt.Printf("adding room num %s\n", id)
-	if _, ok := chat.Rooms[id]; ok {
-		//TODO the room already exist
-		return nil
-	}
+	//if r, ok := chat.Rooms[id]; ok {
+	//	//TODO the room already exist
+	//	return r, nil
+	//}
 	ctx := context.Background()
 	ch, err := chat.brocker.Sub(ctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r := &Room{
 		ID:        id,
 		users:     make(map[string]*User),
 		Broadcast: make(chan Message),
+		subChan:    ch,
+		done:      make(chan struct{}),
 	}
 	chat.Rooms[id] = r
+	chat.serveRoom(r)
+	return r, nil
+}
+
+func (chat *Chat) serveRoom(r *Room) {
 	go func() {
 		for {
 			select {
 			// messages from brocker
-			case msg := <-ch:
-				fmt.Println(msg)
+			case msg := <-r.subChan:
+				fmt.Printf("Room %s received message: %s", r.ID, msg)
 				var m Message
 				err := json.Unmarshal([]byte(msg), &m)
 				if err != nil {
 					fmt.Println(err)
 				}
-				fmt.Printf("brocker got message: %v", m)
+				//fmt.Printf("message form brocker : %v", m)
 				for _, u := range r.users {
 					u.Ch <- m
 				}
 			// messages to brocker
 			case msg := <-r.Broadcast:
-				fmt.Println(msg)
-				ctx = context.Background()
+//				fmt.Println(msg)
+				ctx := context.Background()
 				m, err := json.Marshal(msg)
 				if err != nil {
 					fmt.Println(err)
 				}
-				fmt.Printf("brocker send message: %v", m)
+				fmt.Printf("brocker sent message: %s", m)
 				err = chat.brocker.Pub(ctx, r.ID, m)
 				if err != nil {
 					fmt.Println(err)
 				}
+			case <-r.done:
+				fmt.Println("Received signal to stop serving room: ", r.ID)
+				return
 			}
 		}
 	}()
-	return nil
+
 }
 
 // RemRoom .
 func (chat *Chat) remRoom(id string) {
-	if _, ok := chat.Rooms[id]; ok {
+	if r, ok := chat.Rooms[id]; ok {
+		fmt.Printf("Unsubscribing room %s from subscription", id)
 		chat.brocker.UnSub(id)
+		close(r.done)
 		delete(chat.Rooms, id)
+		fmt.Printf("Room %s deleted from chat server", id)
 	}
 }
 
 // Run .
 func (chat *Chat) Run() {
 	//Default room number
-	err := chat.addRoom("default")
-	if err != nil {
-		panic(err)
-	}
+//	_, err := chat.addRoom("default")
+//	if err != nil {
+//		panic(err)
+//	}
 	for {
 		select {
 		case user := <-chat.reg:
 			// TODO add room if user entered with other room num than default
-			r := chat.Rooms[user.RoomID]
+			if user.RoomID == "" {
+				user.RoomID = "default"
+			}
+			r, ok := chat.Rooms[user.RoomID]
+			if !ok {
+				rr, err := chat.addRoom(user.RoomID)
+				if err != nil {
+					panic(err)
+				}
+				r = rr
+			}
 			// Error when reload page
 			r.users[user.Name] = user
 			// broadcast to pubsub user reg
-			fmt.Printf("user registered: %v", user)
+			fmt.Printf("user %s registered in room: %s\n", user.Name, user.RoomID)
 		case user := <-chat.unreg:
 			r := user.RoomID
 			if _, ok := chat.Rooms[r].users[user.Name]; ok {
 				delete(chat.Rooms[r].users, user.Name)
 				user.Conn.Close()
-				fmt.Printf("user unregistered: %v", user)
-				if len(chat.Rooms[r].users) == 0 && r != "default" {
+				fmt.Printf("user unregistered: %s\n", user.Name)
+//				if len(chat.Rooms[r].users) == 0 && r != "default" {
+				if len(chat.Rooms[r].users) == 0 {
+					fmt.Printf("No users in room: %s, removing room\n", r)
 					chat.remRoom(r)
+					s := make([]string, 0)
+					for k, _ := range chat.Rooms {
+						s = append(s, k)
+					}
+					fmt.Println("Remaining rooms: ", s)
 				}
 			}
 		}
