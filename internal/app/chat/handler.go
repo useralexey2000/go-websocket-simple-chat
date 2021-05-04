@@ -12,8 +12,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-//type userContextKey string
-
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -35,17 +33,11 @@ func AuthMiddleware(next func(w http.ResponseWriter, r *http.Request)) http.Hand
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		//fmt.Println(sess.Values)
-		//Check if user is logged in.
 		_, ok := sess.Values["username"].(string)
 		if !ok {
 			http.Redirect(w, r, "/", http.StatusNetworkAuthenticationRequired)
 			return
 		}
-//		userKey := userContextKey("username")
-//		ctx := context.WithValue(context.Background(), userKey, u)
-//		req := r.WithContext(ctx)
-		//fmt.Println("req : ", req.Context().Value(userContextKey("username")))
 		next(w, r)
 	}
 }
@@ -65,7 +57,7 @@ func RegHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		uname := r.FormValue("username")
 		rname:= r.FormValue("roomname")
-		//Store username to session.
+		//Store username and roomname to session.
 		sess.Values["username"] = uname
 		sess.Values["roomname"] = rname
 		if err := sess.Save(r, w); err != nil {
@@ -80,17 +72,6 @@ func RegHandler(w http.ResponseWriter, r *http.Request) {
 
 // IndexHandler .
 func IndexHandler(w http.ResponseWriter, r *http.Request) {
-	//	sess, err := store.Get(r, "login")
-	//	if err != nil {
-	//		log.Println("cant get sess: ", err)
-	//		return
-	//	}
-	//	fmt.Println(sess.Values)
-	//	//Check if user is logged in.
-	//	if _, ok := sess.Values["username"].(string); !ok {
-	//		http.Redirect(w, r, "/", http.StatusNetworkAuthenticationRequired)
-	//		return
-	//	}
 	http.ServeFile(w, r, filepath.Join("../../", "web/chat.html"))
 }
 
@@ -100,22 +81,6 @@ func WsHandler(chat *Chat) http.HandlerFunc {
 		sess, _ := store.Get(r, "login")
 		uname := sess.Values["username"].(string)
 		rname := sess.Values["roomname"].(string)
-		// fmt.Println("in wsHandler")
-		//v := r.Context().Value(userContextKey("username"))
-		//fmt.Println("value is: ", v)
-		//if v == nil {
-			// TODO check errors dont work
-		//	http.Error(w, errors.New("can't get username").Error(), http.StatusInternalServerError)
-		//	return
-		//}
-		// fmt.Println("before checking")s
-		//uname, ok := v.(string)
-		//if !ok {
-			// TODO check errors dont work
-		//	http.Error(w, errors.New("can't use username").Error(), http.StatusInternalServerError)
-		//	return
-		//}
-		// fmt.Println("username: ", uname)
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Println("cant upgrade conn: ", err)
@@ -123,7 +88,7 @@ func WsHandler(chat *Chat) http.HandlerFunc {
 			return
 		}
 		user := &User{
-			RoomID: rname, 
+			RoomID: rname,
 			Name:   uname,
 			Ch:     make(chan Message),
 			Cht:    chat,

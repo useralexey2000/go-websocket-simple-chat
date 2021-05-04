@@ -37,10 +37,6 @@ func NewChat(brk brocker.Brocker) *Chat {
 
 func (chat *Chat) addRoom(id string)(*Room, error) {
 	fmt.Printf("adding room num %s\n", id)
-	//if r, ok := chat.Rooms[id]; ok {
-	//	//TODO the room already exist
-	//	return r, nil
-	//}
 	ctx := context.Background()
 	ch, err := chat.brocker.Sub(ctx, id)
 	if err != nil {
@@ -70,13 +66,11 @@ func (chat *Chat) serveRoom(r *Room) {
 				if err != nil {
 					fmt.Println(err)
 				}
-				//fmt.Printf("message form brocker : %v", m)
 				for _, u := range r.users {
 					u.Ch <- m
 				}
 			// messages to brocker
 			case msg := <-r.Broadcast:
-//				fmt.Println(msg)
 				ctx := context.Background()
 				m, err := json.Marshal(msg)
 				if err != nil {
@@ -109,15 +103,10 @@ func (chat *Chat) remRoom(id string) {
 
 // Run .
 func (chat *Chat) Run() {
-	//Default room number
-//	_, err := chat.addRoom("default")
-//	if err != nil {
-//		panic(err)
-//	}
 	for {
 		select {
 		case user := <-chat.reg:
-			// TODO add room if user entered with other room num than default
+			//  add room if user entered with other room num than default
 			if user.RoomID == "" {
 				user.RoomID = "default"
 			}
@@ -129,7 +118,6 @@ func (chat *Chat) Run() {
 				}
 				r = rr
 			}
-			// Error when reload page
 			r.users[user.Name] = user
 			// broadcast to pubsub user reg
 			fmt.Printf("user %s registered in room: %s\n", user.Name, user.RoomID)
@@ -139,7 +127,6 @@ func (chat *Chat) Run() {
 				delete(chat.Rooms[r].users, user.Name)
 				user.Conn.Close()
 				fmt.Printf("user unregistered: %s\n", user.Name)
-//				if len(chat.Rooms[r].users) == 0 && r != "default" {
 				if len(chat.Rooms[r].users) == 0 {
 					fmt.Printf("No users in room: %s, removing room\n", r)
 					chat.remRoom(r)
