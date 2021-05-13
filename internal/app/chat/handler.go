@@ -1,8 +1,8 @@
 package chat
 
 import (
-//	"context"
-//	"errors"
+	//	"context"
+	//	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -56,7 +56,7 @@ func RegHandler(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "can't parse form err: %v", err)
 		}
 		uname := r.FormValue("username")
-		rname:= r.FormValue("roomname")
+		rname := r.FormValue("roomname")
 		//Store username and roomname to session.
 		sess.Values["username"] = uname
 		sess.Values["roomname"] = rname
@@ -86,6 +86,10 @@ func WsHandler(chat *Chat) http.HandlerFunc {
 			log.Println("cant upgrade conn: ", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		// push to default room
+		if rname == "" {
+			rname = "default"
 		}
 		user := &User{
 			RoomID: rname,

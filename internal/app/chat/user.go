@@ -15,16 +15,21 @@ type Message struct {
 
 // User ...
 type User struct {
-	Name string
-	Ch   chan Message
+	Name   string
+	Ch     chan Message
 	RoomID string
-	Cht  *Chat
-	Conn *websocket.Conn
+	Cht    *Chat
+	Conn   *websocket.Conn
 }
 
 func (user *User) write() {
+	defer user.Conn.Close()
 	for {
-		msg := <-user.Ch
+		msg, ok := <-user.Ch
+		if !ok {
+			fmt.Printf("Channel of user %s is closed\n", user.Name)
+			break
+		}
 		if err := user.Conn.WriteJSON(msg); err != nil {
 			fmt.Println("cant write to con: ", err)
 			user.Cht.unreg <- user
@@ -34,6 +39,7 @@ func (user *User) write() {
 }
 
 func (user *User) read() {
+	defer user.Conn.Close()
 	for {
 		var msg Message
 		if err := user.Conn.ReadJSON(&msg); err != nil {
